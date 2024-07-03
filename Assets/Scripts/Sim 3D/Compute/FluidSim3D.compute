@@ -1,0 +1,398 @@
+﻿#pragma kernel ExternalForces
+#pragma kernel UpdateSpatialHash
+#pragma kernel CalculateDensities
+#pragma kernel CalculatePressureForce
+#pragma kernel CalculateViscosity
+#pragma kernel UpdatePositions
+
+// Includes
+#include "./FluidMaths3D.hlsl"
+#include "./SpatialHash3D.hlsl"
+struct AABB
+{
+    float3 min;
+    float3 max;
+};
+struct CollisionData
+{
+    bool collision;
+    float3 collisionPoint;
+    float3 collisionNormal;
+};
+
+static const int NumThreads = 64;
+
+// Buffers
+RWStructuredBuffer<float3> Positions;
+RWStructuredBuffer<float3> PredictedPositions;
+RWStructuredBuffer<float3> Velocities;
+RWStructuredBuffer<float1> collisionBuffer;
+RWStructuredBuffer<float3> pVelocities;
+RWStructuredBuffer<float2> Densities; // (Density, Near Density)
+RWStructuredBuffer<uint3> SpatialIndices; 
+RWStructuredBuffer<uint> SpatialOffsets;
+RWStructuredBuffer<float3> ObstacleVertices;
+RWStructuredBuffer<AABB> ObstacleAABBs;
+StructuredBuffer<int> ObstacleTriangles;
+
+
+// Settings
+const uint numParticles;
+const float3 Gravity;
+const float DeltaTime;
+const float CollisionDampingScale;
+const float SmoothingKernelRadius;
+const float TargetDensity;
+const float PressureForceScale;
+const float NearPressureForceScale;
+const float ViscosityForceScale;
+const float3 BoundaryConditionSize;
+const float3 BoundaryConditionCenterPosition;
+const int ObstacleTriangleCount;
+
+//const float4x4 localToWorld;
+//const float4x4 worldToLocal;
+
+
+
+
+
+float PressureFromDensity(float density)
+{
+    return (density - TargetDensity) * PressureForceScale;
+}
+float NearPressureFromDensity(float nearDensity)
+{
+    return nearDensity * NearPressureForceScale;
+}
+
+bool IntersectAABB(float3 pos, AABB aabb)
+{
+    return (pos.x >= aabb.min.x && pos.x <= aabb.max.x &&
+            pos.y >= aabb.min.y && pos.y <= aabb.max.y &&
+            pos.z >= aabb.min.z && pos.z <= aabb.max.z);
+}
+CollisionData IntersectTriangle(float3 pos, float3 vel)
+{
+    CollisionData result;
+    result.collision = false;
+    result.collisionPoint = float3(0, 0, 0);
+    result.collisionNormal = float3(0, 0, 0);
+
+    for (int i = 0; i < ObstacleTriangleCount; i++)
+    {
+        AABB aabb = ObstacleAABBs[i];
+        if (!IntersectAABB(pos, aabb))
+        {
+            continue;
+        }
+        int3 triIndices = int3(ObstacleTriangles[i * 3], ObstacleTriangles[i * 3 + 1], ObstacleTriangles[i * 3 + 2]);
+        float3 v0 = ObstacleVertices[triIndices.x];
+        float3 v1 = ObstacleVertices[triIndices.y];
+        float3 v2 = ObstacleVertices[triIndices.z];
+
+        float3 edge1 = v1 - v0;
+        float3 edge2 = v2 - v0;
+        float3 h = cross(vel, edge2);
+        float a = dot(edge1, h);
+
+        if (a > -0.0001 && a < 0.0001)
+            continue;
+
+        float f = 1.0 / a;
+        float3 s = pos - v0;
+        float u = f * dot(s, h);
+
+        if (u < 0.0 || u > 1.0)
+            continue;
+
+        float3 q = cross(s, edge1);
+        float v = f * dot(vel, q);
+
+        if (v < 0.0 || u + v > 1.0)
+            continue;
+
+        float t = f * dot(edge2, q);
+
+        if (t > 0.0001 && t < length(vel))
+        {
+            result.collisionPoint = pos + vel * t;
+            result.collisionNormal = normalize(cross(edge1, edge2));
+            result.collision = true;
+            break;
+        }
+    }
+
+    return result;
+}
+
+void ResolveCollisions(uint particleIndex)
+{
+    float3 pos = PredictedPositions[particleIndex];
+    float3 vel = Velocities[particleIndex];
+    float3 v2 = vel;
+    if (length(v2) < 1)
+    {
+        v2 = v2 / length(v2);
+    }
+    //v2 = (v2) * 1 / 15;
+    v2 = (v2) * 1 / 2;
+    CollisionData collisionData = IntersectTriangle(Positions[particleIndex], v2);
+    if (collisionData.collision)
+    {
+        float3 collisionPoint = collisionData.collisionPoint;
+        float3 collisionNormal = collisionData.collisionNormal;
+
+        float l = length(vel) * 0.2f;
+        float3 vRel = vel;
+        float3 vNormal = dot(vRel, collisionNormal) * collisionNormal;
+        float3 vTangent = vRel - vNormal;
+        float3 impulse = vNormal - 0.7f * vTangent;
+		
+        //float di = length(pos - collisionPoint);
+        //const float dStick = 1.5;
+        //const float kStick = 1.0;
+        //if (di < dStick)
+        //{
+        //    float3 stickImpulse = -DeltaTime * kStick * di * (1.0f - (di / dStick)) * collisionNormal;
+        //    impulse += stickImpulse;
+        //}
+		
+        vel -= impulse;
+        vel = vel / length(vel) * l;
+        pos = collisionPoint + collisionNormal * 0.002f;
+        collisionBuffer[particleIndex] = 1;
+    }
+    else
+    {
+        collisionBuffer[particleIndex] = 0;
+    }
+
+    // Box boundary collision
+    float3 posLocal = pos;
+    float3 velocityLocal = vel;
+
+    const float3 halfSize = BoundaryConditionSize * 0.5f;
+    const float3 edgeDst = halfSize - abs(posLocal - BoundaryConditionCenterPosition);
+
+    if (edgeDst.x <= 0)
+    {
+        posLocal.x = halfSize.x * sign(posLocal.x - BoundaryConditionCenterPosition.x) + BoundaryConditionCenterPosition.x;
+        velocityLocal.x *= -1 * CollisionDampingScale;
+    }
+    if (edgeDst.y <= 0)
+    {
+        posLocal.y = halfSize.y * sign(posLocal.y - BoundaryConditionCenterPosition.y) + BoundaryConditionCenterPosition.y;
+        velocityLocal.y *= -1 * CollisionDampingScale;
+    }
+    if (edgeDst.z <= 0)
+    {
+        posLocal.z = halfSize.z * sign(posLocal.z - BoundaryConditionCenterPosition.z) + BoundaryConditionCenterPosition.z;
+        velocityLocal.z *= -1 * CollisionDampingScale;
+    }
+	
+    PredictedPositions[particleIndex] = Positions[particleIndex] = posLocal;
+    Velocities[particleIndex] = velocityLocal;
+}
+
+
+
+[numthreads(NumThreads,1,1)]
+void ExternalForces (uint3 id : SV_DispatchThreadID)
+{
+	if (id.x >= numParticles) return;
+
+	// External forces (Gravity)
+    Velocities[id.x] += Gravity * DeltaTime;
+
+	// Predict
+	PredictedPositions[id.x] = Positions[id.x] + Velocities[id.x] * 1 / 120.0;
+    ResolveCollisions(id.x);
+
+}
+
+[numthreads(NumThreads,1,1)]
+void UpdateSpatialHash (uint3 id : SV_DispatchThreadID)
+{
+	if (id.x >= numParticles) return;
+
+	// Reset offsets
+	SpatialOffsets[id.x] = numParticles;
+	// Update index buffer
+	uint index = id.x;
+	int3 cell = GetCell3D(PredictedPositions[index], SmoothingKernelRadius);
+	uint hash = HashCell3D(cell);
+	uint key = KeyFromHash(hash, numParticles);
+	SpatialIndices[id.x] = uint3(index, hash, key);
+}
+
+[numthreads(NumThreads,1,1)]
+void CalculateDensities (uint3 id : SV_DispatchThreadID)
+{
+	if (id.x >= numParticles) return;
+
+	float3 pos = PredictedPositions[id.x];
+	int3 originCell = GetCell3D(pos, SmoothingKernelRadius);
+	float sqrRadius = SmoothingKernelRadius * SmoothingKernelRadius;
+	float density = 0;
+	float nearDensity = 0;
+
+	// Neighbour search
+	for (int i = 0; i < 27; i ++)
+	{
+		uint hash = HashCell3D(originCell + offsets3D[i]);
+		uint key = KeyFromHash(hash, numParticles);
+		uint currIndex = SpatialOffsets[key];
+
+		while (currIndex < numParticles)
+		{
+			uint3 indexData = SpatialIndices[currIndex];
+			currIndex ++;
+			// Exit if no longer looking at correct bin
+			if (indexData[2] != key) break;
+			// Skip if hash does not match
+			if (indexData[1] != hash) continue;
+
+			uint neighbourIndex = indexData[0];
+			float3 neighbourPos = PredictedPositions[neighbourIndex];
+			float3 offsetToNeighbour = neighbourPos - pos;
+			float sqrDstToNeighbour = dot(offsetToNeighbour, offsetToNeighbour);
+
+			// Skip if not within radius
+			if (sqrDstToNeighbour > sqrRadius) continue;
+
+			// Calculate density and near density
+			float dst = sqrt(sqrDstToNeighbour);
+            float d = DensityKernel(dst, SmoothingKernelRadius);
+			density += d;
+			nearDensity += NearDensityKernel(dst, SmoothingKernelRadius);
+		}
+	}
+	
+	Densities[id.x] = float2(density, nearDensity);
+}
+
+[numthreads(NumThreads,1,1)]
+void CalculatePressureForce (uint3 id : SV_DispatchThreadID)
+{
+	if (id.x >= numParticles) return;
+
+	// Calculate pressure
+	float density = Densities[id.x][0];
+	float densityNear = Densities[id.x][1];
+	float pressure = PressureFromDensity(density);
+	float nearPressure = NearPressureFromDensity(densityNear);
+	float3 pressureForce = 0;
+	
+	float3 pos = PredictedPositions[id.x];
+	int3 originCell = GetCell3D(pos, SmoothingKernelRadius);
+	float sqrRadius = SmoothingKernelRadius * SmoothingKernelRadius;
+
+	// Neighbour search
+	for (int i = 0; i < 27; i ++)
+	{
+		uint hash = HashCell3D(originCell + offsets3D[i]);
+		uint key = KeyFromHash(hash, numParticles);
+		uint currIndex = SpatialOffsets[key];
+
+		while (currIndex < numParticles)
+		{
+			uint3 indexData = SpatialIndices[currIndex];
+			currIndex ++;
+			// Exit if no longer looking at correct bin
+			if (indexData[2] != key) break;
+			// Skip if hash does not match
+			if (indexData[1] != hash) continue;
+
+			uint neighbourIndex = indexData[0];
+			// Skip if looking at self
+			if (neighbourIndex == id.x) continue;
+
+			float3 neighbourPos = PredictedPositions[neighbourIndex];
+			float3 offsetToNeighbour = neighbourPos - pos;
+			float sqrDstToNeighbour = dot(offsetToNeighbour, offsetToNeighbour);
+
+			// Skip if not within radius
+			if (sqrDstToNeighbour > sqrRadius) continue;
+
+			// Calculate pressure force
+			float densityNeighbour = Densities[neighbourIndex][0];
+			float nearDensityNeighbour = Densities[neighbourIndex][1];
+			float neighbourPressure = PressureFromDensity(densityNeighbour);
+			float neighbourPressureNear = NearPressureFromDensity(nearDensityNeighbour);
+
+			float sharedPressure = (pressure + neighbourPressure) / 2;
+			float sharedNearPressure = (nearPressure + neighbourPressureNear) / 2;
+
+			float dst = sqrt(sqrDstToNeighbour);
+			float3 dir = dst > 0 ? offsetToNeighbour / dst : float3(0, 1, 0);
+
+			pressureForce += dir * DensityDerivative(dst, SmoothingKernelRadius) * sharedPressure / densityNeighbour;
+			pressureForce += dir * NearDensityDerivative(dst, SmoothingKernelRadius) * sharedNearPressure / nearDensityNeighbour;
+		}
+	}
+
+	float3 acceleration = pressureForce / density;
+	Velocities[id.x] += acceleration * DeltaTime;
+}
+
+[numthreads(NumThreads,1,1)]
+void CalculateViscosity (uint3 id : SV_DispatchThreadID)
+{
+	if (id.x >= numParticles) return;
+		
+	float3 pos = PredictedPositions[id.x];
+	int3 originCell = GetCell3D(pos, SmoothingKernelRadius);
+	float sqrRadius = SmoothingKernelRadius * SmoothingKernelRadius;
+
+	float3 viscosityForce = 0;
+	float3 velocity = Velocities[id.x];
+
+	// Neighbour search
+	for (int i = 0; i < 27; i ++)
+	{
+		uint hash = HashCell3D(originCell + offsets3D[i]);
+		uint key = KeyFromHash(hash, numParticles);
+		uint currIndex = SpatialOffsets[key];
+
+		while (currIndex < numParticles)
+		{
+			uint3 indexData = SpatialIndices[currIndex];
+			currIndex ++;
+			// Exit if no longer looking at correct bin
+			if (indexData[2] != key) break;
+			// Skip if hash does not match
+			if (indexData[1] != hash) continue;
+
+			uint neighbourIndex = indexData[0];
+			// Skip if looking at self
+			if (neighbourIndex == id.x) continue;
+
+			float3 neighbourPos = PredictedPositions[neighbourIndex];
+			float3 offsetToNeighbour = neighbourPos - pos;
+			float sqrDstToNeighbour = dot(offsetToNeighbour, offsetToNeighbour);
+
+			// Skip if not within radius
+			if (sqrDstToNeighbour > sqrRadius) continue;
+
+			// Calculate viscosity
+			float dst = sqrt(sqrDstToNeighbour);
+            float3 neighbourVelocity = Velocities[neighbourIndex];
+            float d = DensityKernel(dst, SmoothingKernelRadius);
+            //viscosityForce += (neighbourVelocity - velocity) * SpikyKernelPow2(dst, SmoothingKernelRadius);
+			viscosityForce += (neighbourVelocity - velocity) * SmoothingKernelPoly6(dst, SmoothingKernelRadius) / d;
+		}
+	}
+	Velocities[id.x] += viscosityForce * ViscosityForceScale * DeltaTime;
+}
+
+[numthreads(NumThreads, 1, 1)]
+void UpdatePositions(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numParticles)
+        return;
+
+	Positions[id.x] += Velocities[id.x] * DeltaTime;
+    pVelocities[id.x] = Velocities[id.x];
+	ResolveCollisions(id.x);
+}
