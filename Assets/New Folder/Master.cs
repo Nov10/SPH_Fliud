@@ -43,9 +43,10 @@ public class Master : MonoBehaviour {
     ComputeBuffer shapeBuffer;
     public void SetData(ComputeBuffer positions)
     {
+        Debug.Log("A");
         BUF_Pos = positions;
         int c = BUF_Pos.count;
-        ps = new Vector3[BUF_Pos.count];
+        //ps = new Vector3[BUF_Pos.count];
         //BUF_Pos.GetData(ps);
         shapeData = new ShapeData[c];
 

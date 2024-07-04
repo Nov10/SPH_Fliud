@@ -78,7 +78,7 @@ public class Simulation3D : MonoBehaviour
         gpuSort.SetBuffers(Buffer_SpatialHashIndices, Buffer_SpatialOffsets);
 
         display.Init(Buffer_Position, Buffer_Velocity);
-        FindObjectOfType<Master>().SetData(Buffer_Position);
+        //FindObjectOfType<Master>().SetData(Buffer_Position);
     }
 
     void FixedUpdate()
@@ -159,8 +159,8 @@ public class Simulation3D : MonoBehaviour
         compute.SetVector("BoundaryConditionSize", simBoundsSize);
         compute.SetVector("BoundaryConditionCenterPosition", simBoundsCentre);
 
-        //compute.SetMatrix("localToWorld", transform.localToWorldMatrix);
-        //compute.SetMatrix("worldToLocal", transform.worldToLocalMatrix);
+        compute.SetMatrix("localToWorld", transform.localToWorldMatrix);
+        compute.SetMatrix("worldToLocal", transform.worldToLocalMatrix);
 
         // 설정 추가: 시간 간격의 영향을 고려한 최소 이동 거리
         compute.SetFloat("minMoveDistance", SmoothingKernelRadius * 0.1f);

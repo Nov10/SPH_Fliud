@@ -50,8 +50,8 @@ const float3 BoundaryConditionSize;
 const float3 BoundaryConditionCenterPosition;
 const int ObstacleTriangleCount;
 
-//const float4x4 localToWorld;
-//const float4x4 worldToLocal;
+const float4x4 localToWorld;
+const float4x4 worldToLocal;
 
 
 
@@ -78,7 +78,7 @@ CollisionData IntersectTriangle(float3 pos, float3 vel)
     result.collision = false;
     result.collisionPoint = float3(0, 0, 0);
     result.collisionNormal = float3(0, 0, 0);
-    return result;
+    //return result;
 
     for (int i = 0; i < ObstacleTriangleCount; i++)
     {
@@ -170,30 +170,37 @@ void ResolveCollisions(uint particleIndex)
     }
 
     // Box boundary collision
-    float3 posLocal = pos;
-    float3 velocityLocal = vel;
+    //float3 posLocal = pos;
+    //float3 velocityLocal = vel;
+	
+		// Transform position/velocity to the local space of the bounding box (scale not included)
+    float3 posLocal = mul(worldToLocal, float4(pos, 1)).xyz;
+    float3 velocityLocal = mul(worldToLocal, float4(vel, 0)).xyz;
 
-    const float3 halfSize = BoundaryConditionSize * 0.5f;
-    const float3 edgeDst = halfSize - abs(posLocal - BoundaryConditionCenterPosition);
+    const float3 halfSize = 0.5f;
+    const float3 edgeDst = halfSize - abs(posLocal);
 
     if (edgeDst.x <= 0)
     {
-        posLocal.x = halfSize.x * sign(posLocal.x - BoundaryConditionCenterPosition.x) + BoundaryConditionCenterPosition.x;
+        posLocal.x = halfSize.x * sign(posLocal.x);
         velocityLocal.x *= -1 * CollisionDampingScale;
     }
     if (edgeDst.y <= 0)
     {
-        posLocal.y = halfSize.y * sign(posLocal.y - BoundaryConditionCenterPosition.y) + BoundaryConditionCenterPosition.y;
+        posLocal.y = halfSize.y * sign(posLocal.y);
         velocityLocal.y *= -1 * CollisionDampingScale;
     }
     if (edgeDst.z <= 0)
     {
-        posLocal.z = halfSize.z * sign(posLocal.z - BoundaryConditionCenterPosition.z) + BoundaryConditionCenterPosition.z;
+        posLocal.z = halfSize.z * sign(posLocal.z);
         velocityLocal.z *= -1 * CollisionDampingScale;
     }
 	
-    PredictedPositions[particleIndex] = Positions[particleIndex] = posLocal;
-    Velocities[particleIndex] = velocityLocal;
+    //posLocal = mul(localToWorld, float4(posLocal, 1)).xyz;
+    //velocityLocal = mul(localToWorld, float4(velocityLocal, 0)).xyz;
+	
+    PredictedPositions[particleIndex] = Positions[particleIndex] = mul(localToWorld, float4(posLocal, 1)).xyz;
+    Velocities[particleIndex] = mul(localToWorld, float4(velocityLocal, 0)).xyz;
 }
 
 
