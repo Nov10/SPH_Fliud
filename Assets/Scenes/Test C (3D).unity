@@ -523,7 +523,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!108 &788227507
 Light:
   m_ObjectHideFlags: 0
@@ -750,7 +750,7 @@ Transform:
   m_GameObject: {fileID: 963194225}
   serializedVersion: 2
   m_LocalRotation: {x: 0.19862385, y: 0, z: 0, w: 0.98007584}
-  m_LocalPosition: {x: -8.35, y: 12, z: -31.42}
+  m_LocalPosition: {x: -2.41, y: 9.34, z: -23}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -1646,7 +1646,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!114 &1678191080
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2335,16 +2335,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f99a384512b94654fbeb7c06c43f81ba, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  numParticlesPerAxis: 33
-  BoundaryConditionCenterPosition: {x: -12.09, y: 1.45, z: 0}
-  size: 3.28
+  numParticlesPerAxis: 48
+  BoundaryConditionCenterPosition: {x: -8.6, y: 0, z: 2.98}
+  size: 6.4
   initialVel:
     x: 0
     y: 0
     z: 0
-  jitterStrength: 0.04
+  jitterStrength: 0.09
   showSpawnBounds: 1
-  debug_numParticles: 35937
+  debug_numParticles: 110592
 --- !u!114 &2135297046
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2408,13 +2408,13 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   timeScale: 1
   fixedTimeStep: 1
-  InverseDeltaTime: 295
-  iterationsPerFrame: 3
-  Gravity: {x: 1.45, y: -9.24, z: 0}
-  CollisionDampingScale: 0.242
-  SmoothingKernelRadius: 0.2
-  TargetDensity: 694.6
-  PressureForceScale: 552.6
+  InverseDeltaTime: 302
+  iterationsPerFrame: 1
+  Gravity: {x: 0, y: -9.24, z: 0}
+  CollisionDampingScale: 1
+  SmoothingKernelRadius: 0.18
+  TargetDensity: 592.7
+  PressureForceScale: 618.3
   NearPressureForceScale: 19.4
   ViscosityForceScale: 11
   compute: {fileID: 7200000, guid: 9443696acfd0ebe4fb503b56d952256c, type: 3}
@@ -2432,8 +2432,8 @@ Transform:
   m_GameObject: {fileID: 2135297044}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -0.06, y: 1.42, z: 0}
-  m_LocalScale: {x: 31.850735, y: 6.9641447, z: 3.590068}
+  m_LocalPosition: {x: -2.97, y: 0, z: 1.77}
+  m_LocalScale: {x: 21.658855, y: 9.975787, z: 8.891923}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 1970340256}

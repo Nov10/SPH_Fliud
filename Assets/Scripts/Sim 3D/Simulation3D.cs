@@ -78,6 +78,7 @@ public class Simulation3D : MonoBehaviour
         gpuSort.SetBuffers(Buffer_SpatialHashIndices, Buffer_SpatialOffsets);
 
         display.Init(Buffer_Position, Buffer_Velocity);
+        FindObjectOfType<Master>().SetData(Buffer_Position);
     }
 
     void FixedUpdate()
@@ -134,6 +135,7 @@ public class Simulation3D : MonoBehaviour
         ComputeHelper.Dispatch(compute, Buffer_Position.count, kernelIndex: pressureKernel);
         ComputeHelper.Dispatch(compute, Buffer_Position.count, kernelIndex: viscosityKernel);
         ComputeHelper.Dispatch(compute, Buffer_Position.count, kernelIndex: updatePositionsKernel);
+
 
     }
 
